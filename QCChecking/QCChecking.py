@@ -46,13 +46,13 @@ class QcSpectrumEntry(object):
         self.counts       = counts
         self.cpsSpectrum  = None
         self.cpsInPeak    = None
-        self.roi          = None # One based index.
+        self.roi          = None # Zero based index.
 
-        self.peaks        = [] # Should be a 1D list, containing the channel number of the peaks.
+        self.peaks        = [] # Should be a 1D list, containing the index (zero based) number of the peaks.
         self.peakHM       = [] # Should be a 2D list, containing the lower and upper bounds of the half max of the peaks.
         self.peakHeight   = [] # Should be a 1D list, containing the heights of the peaks.
 
-        self.validPeakChannel =  -1
+        self.validPeakChannel =  -1 # NOTE: This is one based.
         self.validPeakHeight  =  -1
         self.validPeakFWHM    =  -1
 
@@ -63,12 +63,21 @@ class QcSpectrumEntry(object):
             "NumOfPeaks": False }
         self.validity = False
 
+    def write_counts(self, fn):
+        """
+        Write the counts into the file system.
+
+        fn: The file name with full path.
+        """
+
+        np.savetxt(fn, self.counts, fmt = "%.12e")
+
     def set_roi(self, roi):
         """
         roi: A two element list. Elements should be integers, however, a cast to int is enforced
         """
 
-        self.roi = [ (int)( roi[0] ), (int)( roi[1] ) ]
+        self.roi = [ (int)( roi[0]-1 ), (int)( roi[1]-1 ) ]
 
     def counts_per_second(self):
         """
@@ -77,7 +86,7 @@ class QcSpectrumEntry(object):
 
         self.cps         = self.counts / ( 1.0 * self.collectTime )
         self.cpsSpectrum = np.sum( self.counts ) / (1.0 * self.collectTime )
-        self.cpsInPeak   = np.sum( self.counts[ self.roi[0]-1:self.roi[1]-1 ] ) / (1.0 * self.collectTime )
+        self.cpsInPeak   = np.sum( self.counts[ self.roi[0]:self.roi[1] ] ) / (1.0 * self.collectTime )
     
     def find_peak_by_fit(self, data, idx, groupNum):
         """
@@ -131,13 +140,14 @@ class QcSpectrumEntry(object):
 
         return mu, halfMaxList, h
 
-    def find_peaks(self, gWindowWidth, gStd, slopeThreshold, ampThreshold, peakGroup):
+    def find_peaks(self, gWindowWidth, gStd, slopeThreshold, ampThreshold, peakGroup, outDir = None):
         """
         gWindowWidth: Positive ingeter, the windows width of the Gaussian filter.
         gStd: Positive real number, the standard deviation of the Gaussian filter.
         slopeThreshold: The threshold of the gradients to be considered as a potential peak.
         ampThreshold: The threshold of the height of the cps to be considered as a potential peak.
         peakGroup: A positive integer. Usually larger than 2. The points to take into consideration when finding a potential peak by curve fitting.
+        outDir: If is not None, the diff and convDiff will be written to outDir.
         """
 
         # Calculate the derivatvie.
@@ -149,6 +159,11 @@ class QcSpectrumEntry(object):
 
         # Filter by convolution.
         convDiff = signal.convolve( diff, gaussian, mode = "same" )
+
+        # Write files.
+        if ( outDir is not None ):
+            np.savetxt(outDir + "/" + self.spectrumInfo + "_diff.dat", diff, fmt = "%.12e")
+            np.savetxt(outDir + "/" + self.spectrumInfo + "_convDiff.dat", convDiff, fmt = "%.12e")
 
         # Find the zero-crossing index in convDiff.
         zeroCrossingIdxTuple = np.where( np.diff( np.sign(convDiff) ) )
@@ -181,7 +196,10 @@ class QcSpectrumEntry(object):
             if ( convDiff[idx] < slopeThreshold ):
                 continue
 
-            # May have a potential peak here.
+            # May have a potential peak here. Find the most close index.
+            if ( convDiff[idx] > -convDiff[idx+1] ):
+                idx += 1
+
             mu, halfMaxList, height = self.find_peak_by_fit(self.cps, idx, peakGroup)
 
             if (mu is None):
@@ -371,7 +389,7 @@ if __name__ == "__main__":
     # parser.add_argument("--thicktry_qty",\
     #     help = "Overwrite thicktry_qty in the input JSON file.",\
     #     default = -1, type = int)
-    # parser.add_argument("--write", help = "Write multiple arrays to file system.", action = "store_true", default = False)
+    parser.add_argument("--debug", help = "Save debug infomation to the file system.", action = "store_true", default = False)
 
     args = parser.parse_args()
 
@@ -383,11 +401,22 @@ if __name__ == "__main__":
     detector        = params["detector"]
     findingPeak     = params["findingPeak"]
 
+    if ( True == args.debug ):
+        outDir = params["workingDir"] + "/" + params["outDir"]
+        if ( False == os.path.isdir( outDir ) ):
+            os.makedirs( outDir )
+
     # ==================================================
     # =            Load qc_spectrum.csv.               =
     # ==================================================
 
     qcSpectrumEngtryDict = read_and_create_QcSpectrumEntryDict( params["workingDir"] + "/" + params["dataDir"], qc_spectrum_csv )
+    if ( True == args.debug ):
+        print("Write raw data to the file system.")
+        for key, entry in qcSpectrumEngtryDict.items():
+            fn = outDir + "/" + entry.spectrumInfo + ".dat"
+            entry.write_counts(fn)
+            print("Write %s." % (fn))
 
     # ==================================================
     # =            Load qc_history.csv.               =
@@ -410,13 +439,19 @@ if __name__ == "__main__":
     # =                  Find peaks.                   =
     # ==================================================
 
+    if ( True == args.debug ):
+        outDir_diffs = outDir
+    else:
+        outDir_diffs = None
+
     for key, qcSE in qcSpectrumEngtryDict.items():
         qcSE.find_peaks(\
             findingPeak["smoothWidth"],\
             findingPeak["smoothWidth"] / findingPeak["smoothWidthStdFactor"],\
             findingPeak["slopeThreshold"],\
             findingPeak["ampThreshold"],\
-            findingPeak["peakGroup"] )
+            findingPeak["peakGroup"],\
+            outDir_diffs )
 
         qcSE.show_peak_info()
 
