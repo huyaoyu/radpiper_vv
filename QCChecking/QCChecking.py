@@ -52,6 +52,17 @@ class QcSpectrumEntry(object):
         self.peakHM       = [] # Should be a 2D list, containing the lower and upper bounds of the half max of the peaks.
         self.peakHeight   = [] # Should be a 1D list, containing the heights of the peaks.
 
+        self.validPeakChannel =  -1
+        self.validPeakHeight  =  -1
+        self.validPeakFWHM    =  -1
+
+        self.validityDict = { \
+            "CPSInPeak": False,\
+            "Channel": False,\
+            "FWHM": False,\
+            "NumOfPeaks": False }
+        self.validity = False
+
     def set_roi(self, roi):
         """
         roi: A two element list. Elements should be integers, however, a cast to int is enforced
@@ -75,7 +86,7 @@ class QcSpectrumEntry(object):
         groupNumber: Positive integer. The number of points need to sample.
 
         return: mu, halfMaxList, h
-            mu: Floating point number, the channel of the peak. None if failed
+            mu: Floating point number, the index of the peak, zero based. None if failed
             halfMaxList: A two-element 1D list, the lower and upper bound of the half max width. None.
             h: Floating point number, the peak height. None if failed
         """
@@ -184,7 +195,7 @@ class QcSpectrumEntry(object):
     def get_num_peaks(self):
         return len(self.peaks)
 
-    def get_peak_channel(self, peakChannelLow, peakChannelHigh):
+    def bound_peak_channel(self, peakChannelLow, peakChannelHigh):
         """
         Find the peak channels that fall in the range defined by peakChannelLow and peakChannelHigh.
 
@@ -196,8 +207,7 @@ class QcSpectrumEntry(object):
         peakChannelLow: Positive number. One based channel number.
         peakChannelHigh: Positive number. One based channel number. Should be larger than peakChannelLow.
 
-        return: A list contains all the valid channels. The channels will be cast to their nearest integers.
-            Note that channel number is one based. If no valid channel is found, a empty list will be returned.
+        The channel will be cast to their nearest integers. Note that channel number is one based. 
         """
 
         # Validity check.
@@ -208,23 +218,58 @@ class QcSpectrumEntry(object):
         if ( peakChannelHigh - peakChannelLow < 2 ):
             raise Exception("peakChannelHigh - peakChannelLow < 2")
         
-        # Find valid channels.
-        validChannels = []
-        for p in self.peaks:
-            if ( p >= peakChannelLow and p <= peakChannelHigh ):
-                validChannels.append( int( p + 0.5 ) + 1 )
-        
-        return validChannels
+        # Check if there is peak present.
+        if ( 0 == len(self.peaks) ):
+            return
+
+        # Middle value.
+        m = ( (peakChannelLow - 1) + (peakChannelHigh - 1) ) / 2.0
+
+        # Find the nearest.
+        idx = np.argmin( np.fabs( np.array(self.peaks) - m ) )
+
+        channel = (int)( self.peaks[idx] + 0.5 ) + 1
+
+        if ( channel >= peakChannelLow and channel <= peakChannelHigh ):
+            self.validPeakChannel = channel
+            self.validPeakFWHM    = self.peakHM[idx][1] - self.peakHM[idx][0]
+            self.validPeakHeight  = self.peakHeight[idx]     
 
     def show_peak_info(self):
         print("%s has %d peaks found." % (self.spectrumInfo, len(self.peaks)))
 
         for i in range( len(self.peaks) ):
-            print("Peak %d, c = %.4e, FWHM = %.4e, height = %.4e" % \
+            print("Peak %d, idx = %.4e, FWHM = %.4e, height = %.4e" % \
                 ( i + 1,\
                 self.peaks[i],\
                 self.peakHM[i][1] - self.peakHM[i][0],\
                 self.peakHeight[i]) )
+
+    def check_validity(self,\
+        cpsInPeakLow, cpsInPeakHigh,\
+        FWHMLow, FWHMHigh,\
+        nPeaksLow, nPeaksHigh):
+        
+        if ( self.validPeakChannel == -1 ):
+            return
+        else:
+            self.validityDict["Channel"] = True
+        
+        if ( self.validPeakHeight >= cpsInPeakLow and self.validPeakHeight <= cpsInPeakHigh ):
+            self.validityDict["CPSInPeak"] = True
+
+        if ( self.validPeakFWHM >= FWHMLow and self.validPeakFWHM <= FWHMHigh ):
+            self.validityDict["FWHM"] = True
+        
+        nPeaks = len( self.peaks )
+        if ( nPeaks >= nPeaksLow and nPeaks <= nPeaksHigh ):
+            self.validityDict["NumOfPeaks"] = True
+
+        self.validity = True
+        for key, value in self.validityDict.items():
+            if ( False == value ):
+                self.validity = False
+                break
 
 def convert_counts_string(countsStr, d = "|"):
     """
@@ -348,7 +393,7 @@ if __name__ == "__main__":
     # =            Load qc_history.csv.               =
     # ==================================================
 
-    qcHistroyDF = read_and_create_df_QcHistiory( params["workingDir"] + "/" + params["dataDir"], qc_history_csv )
+    qcHistoryDF = read_and_create_df_QcHistiory( params["workingDir"] + "/" + params["dataDir"], qc_history_csv )
 
     # ==================================================
     # =               CPS & CPS in peak.               =
@@ -374,5 +419,29 @@ if __name__ == "__main__":
             findingPeak["peakGroup"] )
 
         qcSE.show_peak_info()
-        qcSE.get_peak_channel(qc_history_csv["peak_channel_low"], qc_history_csv["peak_channel_high"])
-    
+
+        # Find the "start" entry in qcHistoryDF.
+        entry = qcHistoryDF.loc[ qcHistoryDF[qc_history_csv["qc_type"]] == qcSE.spectrumInfo ]
+
+        peakChannelLow  = entry[qc_history_csv["peak_channel_low"]].iloc[0]
+        peakChannelHigh = entry[qc_history_csv["peak_channel_high"]].iloc[0]
+
+        qcSE.bound_peak_channel( peakChannelLow, peakChannelHigh )
+
+        if ( qcSE.validPeakChannel > 0 ):
+            print("Valid channel: %d" % ( qcSE.validPeakChannel ))
+            print("Valid height: %f" % (qcSE.validPeakHeight ))
+            print("Valid FWHM: %f" % ( qcSE.validPeakFWHM ))
+            print("With peak_channel_low = %d, peak_channel_high = %d." % (peakChannelLow, peakChannelHigh))
+        else:
+            print("No valid channel.")
+
+        cpsL    = entry[qc_history_csv["peak_cps_low"]].iloc[0]
+        cpsH    = entry[qc_history_csv["peak_cps_high"]].iloc[0]
+        FWHML   = entry[qc_history_csv["fwhm_low"]].iloc[0]
+        FWHMH   = entry[qc_history_csv["fwhm_high"]].iloc[0]
+        nPeaksL = qc_history_csv["num_peaks_low"]
+        nPeaksH = qc_history_csv["num_peaks_high"]
+
+        qcSE.check_validity( cpsL, cpsH, FWHML, FWHMH, nPeaksL, nPeaksH )
+        print("Validity: {}\n".format(qcSE.validityDict))
