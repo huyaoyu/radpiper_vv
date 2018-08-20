@@ -48,6 +48,9 @@ class QcSpectrumEntry(object):
         self.cpsInPeak    = None
         self.roi          = None # Zero based index.
 
+        self.cpsLow       = None
+        self.cpsHigh      = None
+
         self.peaks        = [] # Should be a 1D list, containing the index (zero based) number of the peaks.
         self.peakHM       = [] # Should be a 2D list, containing the lower and upper bounds of the half max of the peaks.
         self.peakHeight   = [] # Should be a 1D list, containing the heights of the peaks.
@@ -55,6 +58,12 @@ class QcSpectrumEntry(object):
         self.validPeakChannel =  -1 # NOTE: This is one based.
         self.validPeakHeight  =  -1
         self.validPeakFWHM    =  -1
+
+        self.peakChannelLow  = None
+        self.peakChannelHigh = None
+
+        self.fwhmLow  = None
+        self.fwhmHigh = None
 
         self.validityDict = { \
             "CPSInPeak": False,\
@@ -213,6 +222,9 @@ class QcSpectrumEntry(object):
     def get_num_peaks(self):
         return len(self.peaks)
 
+    def get_peaks_channel(self):
+        return [ p + 1.0 for p in self.peaks ]
+
     def bound_peak_channel(self, peakChannelLow, peakChannelHigh):
         """
         Find the peak channels that fall in the range defined by peakChannelLow and peakChannelHigh.
@@ -227,6 +239,9 @@ class QcSpectrumEntry(object):
 
         The channel will be cast to their nearest integers. Note that channel number is one based. 
         """
+
+        self.peakChannelLow  = peakChannelLow
+        self.peakChannelHigh = peakChannelHigh
 
         # Validity check.
         if ( peakChannelLow <= 0 or peakChannelHigh <= 0 ):
@@ -267,14 +282,19 @@ class QcSpectrumEntry(object):
         cpsInPeakLow, cpsInPeakHigh,\
         FWHMLow, FWHMHigh,\
         nPeaksLow, nPeaksHigh):
+
+        self.cpsLow   = cpsInPeakLow
+        self.cpsHigh  = cpsInPeakHigh
+        self.fwhmLow  = FWHMLow
+        self.fwhmHigh = FWHMHigh
         
+        if ( self.cpsInPeak >= cpsInPeakLow and self.cpsInPeak <= cpsInPeakHigh ):
+            self.validityDict["CPSInPeak"] = True
+
         if ( self.validPeakChannel == -1 ):
             return
         else:
             self.validityDict["Channel"] = True
-        
-        if ( self.validPeakHeight >= cpsInPeakLow and self.validPeakHeight <= cpsInPeakHigh ):
-            self.validityDict["CPSInPeak"] = True
 
         if ( self.validPeakFWHM >= FWHMLow and self.validPeakFWHM <= FWHMHigh ):
             self.validityDict["FWHM"] = True
@@ -366,6 +386,120 @@ def read_and_create_df_QcHistiory(dataDir, qcHistoryDict):
 
     return df
 
+def convert_floats_to_strings(floats):
+    """
+    Convert the floating point numbers into a string representation that similar to those used in
+    qc_history.csv or qc_history_postproc.csv.
+    """
+
+    resString = ""
+
+    for f in floats:
+        resString += "%.6f|" % (f)
+
+    # Remove the last character.
+    resString = resString[:-1]
+
+    return resString
+
+def compose_df(qcSpectrumEntryDict, qcHistoryDict):
+    """
+    Compose a pandas dataframe similar to qc_history.csv and qc_history_postproc.csv.
+    """
+
+    # Lists for various columns.
+    qcType              = []
+    qcCollectTime       = []
+    qcStatus            = []
+    numPeaks            = []
+    peakLocations       = []
+    peakHeights         = []
+    peakChannel         = []
+    peakChannelLow      = []
+    peakChannelHigh     = []
+    peakChannelInBounds = []
+    peakCps             = []
+    peakCpsLow          = []
+    peakCpsHigh         = []
+    peakCpsInBounds     = []
+    fwhm                = []
+    fwhmLow             = []
+    fwhmHigh            = []
+    fwhmInBounds        = []
+
+    NOT_DEFINED = "NOT_DEFINED"
+
+    # Loop over qcSpectrumEntryDict.
+    for key, entry in qcSpectrumEntryDict.items():
+        qcType.append( entry.spectrumInfo )
+        qcCollectTime.append( entry.collectTime )
+        qcStatus.append( NOT_DEFINED )
+        numPeaks.append( entry.get_num_peaks() )
+        peakLocations.append( convert_floats_to_strings( entry.get_peaks_channel() ) )
+        peakHeights.append( convert_floats_to_strings( entry.peakHeight ) )
+        peakChannel.append( entry.validPeakChannel )
+        peakChannelLow.append( entry.peakChannelLow )
+        peakChannelHigh.append( entry.peakChannelHigh )
+
+        if ( entry.validPeakChannel > 0 ):
+            peakChannelInBounds.append( True )
+        else:
+            peakChannelInBounds.append( False )
+
+        peakCps.append( entry.cpsInPeak )
+        peakCpsLow.append( entry.cpsLow )
+        peakCpsHigh.append( entry.cpsHigh )
+        peakCpsInBounds.append( entry.validityDict["CPSInPeak"] )
+        fwhm.append( entry.validPeakFWHM )
+        fwhmLow.append( entry.fwhmLow )
+        fwhmHigh.append( entry.fwhmHigh )
+        fwhmInBounds.append( entry.validityDict["FWHM"] )
+
+    # Compose the pandas dataframe.
+    dataframeDict = {
+        qcHistoryDict["qc_type"]: qcType,
+        qcHistoryDict["qc_collect_time"]: qcCollectTime,
+        qcHistoryDict["qc_status"]: qcStatus,
+        qcHistoryDict["num_peaks"]: numPeaks,
+        qcHistoryDict["peak_locations"]: peakLocations,
+        qcHistoryDict["peak_heights"]: peakHeights,
+        qcHistoryDict["peak_channel"]: peakChannel,
+        qcHistoryDict["peak_channel_low"]: peakChannelLow,
+        qcHistoryDict["peak_channel_high"]: peakChannelHigh,
+        qcHistoryDict["peak_channel_in_bounds"]: peakChannelInBounds,
+        qcHistoryDict["peak_cps"]: peakCps,
+        qcHistoryDict["peak_cps_low"]: peakCpsLow,
+        qcHistoryDict["peak_cps_high"]: peakCpsHigh,
+        qcHistoryDict["peak_cps_in_bounds"]: peakCpsInBounds,
+        qcHistoryDict["fwhm"]: fwhm,
+        qcHistoryDict["fwhm_low"]: fwhmLow,
+        qcHistoryDict["fwhm_high"]: fwhmHigh,
+        qcHistoryDict["fwhm_in_bounds"]: fwhmInBounds
+    }
+
+    df = pd.DataFrame( data = dataframeDict )
+
+    return df[[\
+        qcHistoryDict["qc_type"],\
+        qcHistoryDict["qc_collect_time"],\
+        qcHistoryDict["qc_status"],\
+        qcHistoryDict["num_peaks"],\
+        qcHistoryDict["peak_locations"],\
+        qcHistoryDict["peak_heights"],\
+        qcHistoryDict["peak_channel"],\
+        qcHistoryDict["peak_channel_low"],\
+        qcHistoryDict["peak_channel_high"],\
+        qcHistoryDict["peak_channel_in_bounds"],\
+        qcHistoryDict["peak_cps"],\
+        qcHistoryDict["peak_cps_low"],\
+        qcHistoryDict["peak_cps_high"],\
+        qcHistoryDict["peak_cps_in_bounds"],\
+        qcHistoryDict["fwhm"],\
+        qcHistoryDict["fwhm_low"],\
+        qcHistoryDict["fwhm_high"],\
+        qcHistoryDict["fwhm_in_bounds"]
+    ]]
+
 if __name__ == "__main__":
     # ==================================================
     # =              Input arguments.                  =
@@ -374,21 +508,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run Test 55. Re-implement geometry flagging (thickness and hole).")
 
     parser.add_argument("--input", help = "The filename of the input JSON file.", default = "./" + DEFAULT_INPUT)
-    # parser.add_argument("--voiddiam_m",\
-    #     help = "Overwrite voiddiam_m in the input JSON file.",\
-    #     default = -1.0, type = float)
-    # parser.add_argument("--void_qty",\
-    #     help = "Overwrite void_qty in the input JSON file.",\
-    #     default = -1, type = int)
-    # parser.add_argument("--thickdiam_m",\
-    #     help = "Overwrite thickdiam_m in the input JSON file.",\
-    #     default = -1.0, type = float)
-    # parser.add_argument("--thicksample_qty",\
-    #     help = "Overwrite thicksample_qty in the input JSON file.",\
-    #     default = -1, type = int)
-    # parser.add_argument("--thicktry_qty",\
-    #     help = "Overwrite thicktry_qty in the input JSON file.",\
-    #     default = -1, type = int)
     parser.add_argument("--debug", help = "Save debug infomation to the file system.", action = "store_true", default = False)
 
     args = parser.parse_args()
@@ -401,19 +520,18 @@ if __name__ == "__main__":
     detector        = params["detector"]
     findingPeak     = params["findingPeak"]
 
-    if ( True == args.debug ):
-        outDir = params["workingDir"] + "/" + params["outDir"]
-        if ( False == os.path.isdir( outDir ) ):
-            os.makedirs( outDir )
+    outDir = params["workingDir"] + "/" + params["outDir"]
+    if ( False == os.path.isdir( outDir ) ):
+        os.makedirs( outDir )
 
     # ==================================================
     # =            Load qc_spectrum.csv.               =
     # ==================================================
 
-    qcSpectrumEngtryDict = read_and_create_QcSpectrumEntryDict( params["workingDir"] + "/" + params["dataDir"], qc_spectrum_csv )
+    qcSpectrumEntryDict = read_and_create_QcSpectrumEntryDict( params["workingDir"] + "/" + params["dataDir"], qc_spectrum_csv )
     if ( True == args.debug ):
         print("Write raw data to the file system.")
-        for key, entry in qcSpectrumEngtryDict.items():
+        for key, entry in qcSpectrumEntryDict.items():
             fn = outDir + "/" + entry.spectrumInfo + ".dat"
             entry.write_counts(fn)
             print("Write %s." % (fn))
@@ -429,7 +547,7 @@ if __name__ == "__main__":
     # ==================================================
 
     # Set ROIs.
-    for key, qcSE in qcSpectrumEngtryDict.items():
+    for key, qcSE in qcSpectrumEntryDict.items():
         qcSE.set_roi( detector["qc_roi"] )
         qcSE.counts_per_second()
 
@@ -444,7 +562,7 @@ if __name__ == "__main__":
     else:
         outDir_diffs = None
 
-    for key, qcSE in qcSpectrumEngtryDict.items():
+    for key, qcSE in qcSpectrumEntryDict.items():
         qcSE.find_peaks(\
             findingPeak["smoothWidth"],\
             findingPeak["smoothWidth"] / findingPeak["smoothWidthStdFactor"],\
@@ -480,3 +598,14 @@ if __name__ == "__main__":
 
         qcSE.check_validity( cpsL, cpsH, FWHML, FWHMH, nPeaksL, nPeaksH )
         print("Validity: {}\n".format(qcSE.validityDict))
+
+    # ==================================================
+    # =              Compose csv file.                 =
+    # ==================================================
+
+    outputDF = compose_df( qcSpectrumEntryDict, qc_history_csv )
+    print(outputDF)
+    comparingFilename = outDir + "/compare_with_history.csv"
+    outputDF.to_csv( comparingFilename )
+    print("Comparing file saved to %s" % (comparingFilename))
+    
