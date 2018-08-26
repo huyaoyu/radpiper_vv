@@ -410,6 +410,10 @@ if __name__ == "__main__":
         calSpectrum[0, 0:2], calSpectrum[0, 2], rplidarScan, 1e-6)
 
     print("The valid indices based in %s are [%d, %d]." % (params["rplidarScan"], idxStart, idxEnd))
+    print("%s row index %d, timestamps: %d, %d" % \
+        (params["rplidarScan"], idxStart, rplidarScan[idxStart, 0], rplidarScan[idxStart, 1]))
+    print("%s row index %d, timestamps: %d, %d" % \
+        (params["rplidarScan"], idxEnd, rplidarScan[idxEnd, 0], rplidarScan[idxEnd, 1]))
 
     # Slice the data from the only DataBin object.
     dataBinList[0].diameters = dataBinList[0].diameters[ idxStart:idxEnd+1, : ]
@@ -420,7 +424,7 @@ if __name__ == "__main__":
     # =========================================================
 
     print_delimeter(title = "void_flag.")
-
+    
     void_flag = count_against_voiddiam_m(dataBinList, voiddiam_m, void_qty)
 
     # ============================================================
@@ -428,7 +432,7 @@ if __name__ == "__main__":
     # ============================================================
 
     print_delimeter(title = "Random sample and mean calculation.")
-
+    
     randomSampledDiam = randoms_sample_on_DataBins(dataBinList, voiddiam_m, thicksample_qty, thicktry_qty)
 
     # ====================================================
