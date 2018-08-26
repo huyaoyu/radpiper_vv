@@ -38,6 +38,16 @@ def read_csv_as_array(csvFilename, header = 0, omit = None):
 
     return array
 
+def read_csv_columns_as_array(csvFilename, cols):
+    # Read the csv file.
+    df = pd.read_csv(csvFilename, header = None, usecols=cols, skiprows=[0])
+
+    array = df.values
+
+    print("read_csv_columns_as_array: {} read. shape = {}.".format(csvFilename, array.shape))
+
+    return array 
+
 def find_valid_diameters(raw):
     """
     raw: A 2D NumPy array. Each row of the array is an entry.
@@ -140,6 +150,38 @@ def split_into_DataBins(diameters, scanBins, segmentColumnIndex = 1, forwardColu
             print("Create DataBin object with s = %2d, f = %d, num = %d." % (s, f, db.diameters.shape[0]))
 
     return dataBinList
+
+def find_valid_indices_by_time_frame(endTimestamp, timeSpan, timestampArray, tolerance):
+    """
+    endTimestamp: A two element NumPy array. Integers. [second, nanosecond].
+    timeSpan: A floating point number. Seconds passed.
+    timestampArray: A 2D NumPy matrix. Each row is like an endTimestamp.
+    tolerance: A positive floating point number. If the staring or ending index is the first or the last
+        index of timestampArray, a further check will be made. The check will test whether the 
+        starting time or the ending time is in the vicinity of the first element or the last
+        element of timestampArray within a range defined by tolerance.
+
+    return: A two element list. Valid starting and ending index in timestampArray.
+    """
+
+    # Compose floating point number representations of endTimestamp and timestampArray.
+    endT   = endTimestamp[0] + endTimestamp[1] / 1e9
+    ts     = timestampArray[:, 0] + timestampArray[:, 1] / 1e9
+    startT = endT - timeSpan
+
+    # Find the nearest timestamp of starting point.
+    idxStart = np.argmin( np.fabs( ts - startT ) )
+    idxEnd   = np.argmin( np.fabs( ts -   endT ) )
+
+    if ( idxStart == 0 and ts[0] < startT):
+        if ( ts[0] - startT > tolerance ):
+            raise Exception("Starting timestamp out of range.")
+
+    if ( idxEnd == ts.size - 1 and endT > ts[-1] ):
+        if ( endT - ts[-1] > tolerance):
+            raise Exception("Ending timestamp out of range.")
+
+    return [idxStart, idxEnd]
 
 def count_against_voiddiam_m(dataBinList, voiddiam_m, void_qty):
     void_flag = np.zeros((len(dataBinList)), dtype = np.int)
@@ -298,23 +340,32 @@ if __name__ == "__main__":
     # =                  Read files.                   =
     # ==================================================
 
-    fnCentered = workingDir + "/" + params["rplidar_raw"]
+    fnCentered = workingDir + "/" + params["centered"]
     print("Reading %s..." % (fnCentered))
-    rplidarRaw = read_csv_as_array(fnCentered, header = None)
+    centered = read_csv_as_array(fnCentered, header = None)
 
-    fnScanBins = workingDir + "/" + params["scan_bins"]
+    fnRplidarScan = workingDir + "/" + params["rplidarScan"]
+    print("Reading %s..." % (fnRplidarScan))
+    rplidarScan = read_csv_columns_as_array(fnRplidarScan, cols = [3, 4])
+
+    fnCalSpectrum = workingDir + "/" + params["calSpectrum"]
+    print("Reading %s..." % (fnCalSpectrum))
+    calSpectrum = read_csv_columns_as_array(fnCalSpectrum, cols = [3, 4, 7])
+
+    fnScanBins = workingDir + "/" + params["scanBins"]
     print("Reading %s..." % (fnScanBins))
     scanBins = read_csv_as_array(fnScanBins)
 
     # Check the dimensions.
-    if ( rplidarRaw.shape[0] != scanBins.shape[0] ):
+    if ( centered.shape[0] != scanBins.shape[0] or \
+         centered.shape[0] != rplidarScan.shape[0] ):
         raise Exception("The dimensions are not compatible.")
 
     # ==================================================
     # =                  Diameters.                    =
     # ==================================================
 
-    diameters = find_valid_diameters(rplidarRaw[:, 2:362])
+    diameters = find_valid_diameters(centered[:, 2:362])
 
     if ( True == args.write ):
         np.savetxt( output + "/diameters.dat", diameters, fmt = "%.6e" )
@@ -348,6 +399,21 @@ if __name__ == "__main__":
     print_delimeter(title = "Create data bins.")
 
     dataBinList = split_into_DataBins(diametersM, scanBinsM)
+
+    # Must be only one DataBin object.
+
+    if ( len(dataBinList) != 1 ):
+        raise Exception("Too many DataBin objects. len(dataBinList) = %d." % (len(dataBinList)))
+
+    # Find the valid timestamp indices.
+    [idxStart, idxEnd] = find_valid_indices_by_time_frame(\
+        calSpectrum[0, 0:2], calSpectrum[0, 2], rplidarScan, 1e-6)
+
+    print("The valid indices based in %s are [%d, %d]." % (params["rplidarScan"], idxStart, idxEnd))
+
+    # Slice the data from the only DataBin object.
+    dataBinList[0].diameters = dataBinList[0].diameters[ idxStart:idxEnd+1, : ]
+    dataBinList[0].scanBins  = dataBinList[0].scanBins[ idxStart:idxEnd+1, : ]
 
     # =========================================================
     # = Count the number of diameters larger than voiddiam_m. =
