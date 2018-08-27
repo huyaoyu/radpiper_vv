@@ -11,6 +11,8 @@ import numpy as np
 import os
 import pandas as pd
 
+DEBUG_FLAG = False
+
 DEFAULT_WORKING_DIR = "./data"
 DEFAULT_INPUT = "input.json"
 
@@ -50,6 +52,114 @@ def find_valid_diameters(raw):
         raise Exception("Wrong shape. shape = {}.".format(raw.shape))
 
     d = raw[:, 0:180] + raw[:, 180:]
+
+    return d
+
+def find_radius_by_angle(radii, angles, gapWidthThreshold = 2):
+    # Check the dimensions.
+    
+    if ( radii.shape != angles.shape ):
+        raise Exception("radii({}) and angles({}) have different dimensions.".format(radii.shape, angles.shape))
+
+    idxFiniteAngles = np.where( np.isfinite( angles ) )[0]
+    finiteAngles    = angles[idxFiniteAngles]
+
+    # Prepare two matrix.
+    m0, m1 = np.meshgrid(finiteAngles, finiteAngles)
+
+    m1       += np.pi
+    mask      = m1 >= np.pi
+    m1[mask] -= 2 * np.pi
+
+    # Subtract.
+    s  = m0 - m1
+    sa = np.fabs(s)
+
+    matchedRadii = np.ones_like(radii) * np.inf
+
+    for i in range(s.shape[0]):
+        # Find the closest index.
+        idxfa = np.argmin( sa[i, :] )
+
+        idx = idxFiniteAngles[idxfa]
+
+        # if ( DEBUG_FLAG == True and idxfa == 179 ):
+        #     idxfa = idxfa
+
+        if ( s[i, idxfa] > 0 ):
+            # Look to the left.
+            if ( np.isfinite( angles[ idx - 1 ] ) ):
+                matchedRadii[idxFiniteAngles[i]] = radii[idx]
+            else:
+                # Figure out the gap width.
+                idxLeft = idxFiniteAngles[ idxfa - 1 ]
+
+                if ( idxLeft > idx ):
+                    # Loop back.
+                    gapWidth = angles.size - idxLeft + idx - 1
+                else:
+                    gapWidth = idx - idxLeft - 1
+                
+                if ( gapWidth <= gapWidthThreshold ):
+                    matchedRadii[idxFiniteAngles[i]] = radii[idx]
+        elif ( s[i, idxfa] < 0 ):
+            # Look to the right.
+            if ( idx == angles.shape[0] - 1 ):
+                newIdx = 0
+            else:
+                newIdx = idx + 1
+
+            if ( np.isfinite( angles[newIdx] ) ):
+                matchedRadii[idxFiniteAngles[i]] = radii[idx]
+            else:
+                # Figure out the gap width.
+                if ( idxfa == idxFiniteAngles.size - 1 ):
+                    newIdxfa = 0
+                else:
+                    newIdxfa = idxfa + 1
+
+                idxRight = idxFiniteAngles[ newIdxfa ]
+
+                if ( idxRight < idx ):
+                    # Loop back.
+                    gapWidth = angles.size - idx + idxRight - 1
+                else:
+                    gapWidth = idxRight - idx - 1
+                
+                if ( gapWidth <= gapWidthThreshold ):
+                    matchedRadii[idxFiniteAngles[i]] = radii[idx]
+        else:
+            matchedRadii[idxFiniteAngles[i]] = radii[idx]
+
+    return matchedRadii
+
+def find_valid_diameters_by_angle(raw):
+    """
+    raw: A 2D NumPy array. Each row of the array is an entry.
+
+    returns: A 2D NumPy array.
+    """
+
+    # Check the dimension.
+    if ( 720 != raw.shape[1] ):
+        raise Exception("Wrong shape. shape = {}.".format(raw.shape))
+
+    d = np.zeros((raw.shape[0], 360), dtype = np.float)
+
+    # Process row by row.
+    for i in range( raw.shape[0] ):
+
+        # if ( i == 1753 ):
+        #     global DEBUG_FLAG 
+        #     DEBUG_FLAG = True
+        #     import ipdb; ipdb.set_trace()
+
+        r = raw[i, :][  0:360]
+        a = raw[i, :][360:720]
+
+        mr = find_radius_by_angle(r, a, 2)
+
+        d[i, :] = r + mr
 
     return d
 
@@ -141,12 +251,14 @@ def split_into_DataBins(diameters, scanBins, segmentColumnIndex = 1, forwardColu
 
     return dataBinList
 
-def count_against_voiddiam_m(dataBinList, voiddiam_m, void_qty):
+def count_against_voiddiam_m(dataBinList, voiddiam_m, void_qty, divider = 1):
     void_flag = np.zeros((len(dataBinList)), dtype = np.int)
 
     for i in range(len(dataBinList)):
         db = dataBinList[i]
         count = db.count_voiddiam(voiddiam_m)
+
+        count = (int)( 1.0 * count / divider + 0.5 )
 
         if ( count > void_qty ):
             void_flag[i] = 1
@@ -314,7 +426,8 @@ if __name__ == "__main__":
     # =                  Diameters.                    =
     # ==================================================
 
-    diameters = find_valid_diameters(rplidarRaw[:, 2:362])
+    # diameters = find_valid_diameters(rplidarRaw[:, 2:362])
+    diameters = find_valid_diameters_by_angle(rplidarRaw[:, 2:722])
 
     if ( True == args.write ):
         np.savetxt( output + "/diameters.dat", diameters, fmt = "%.6e" )
@@ -354,8 +467,8 @@ if __name__ == "__main__":
     # =========================================================
 
     print_delimeter(title = "void_flag.")
-
-    void_flag = count_against_voiddiam_m(dataBinList, voiddiam_m, void_qty)
+    
+    void_flag = count_against_voiddiam_m(dataBinList, voiddiam_m, void_qty, 2)
 
     # ============================================================
     # = Random sample from diameters for each segment-direction. =
