@@ -1,0 +1,52 @@
+{
+    "workingDir": ".",
+    "dataDir": "RadPiper-02_0254_30SteelPipe_2018-07-23-14-35-23",
+    "outDir": "output",
+    "qc_spectrum_csv": 
+        {
+            "filename": "qc_spectrum.csv",
+            "spectrum_info": "spectrum_info",
+            "collect_time": "collect_time",
+            "counts": "counts",
+            "start": "start",
+            "end": "end"
+        },
+    "qc_history_csv": 
+        {
+            "filename": "qc_history.csv",
+            "qc_header_seq": "qc header seq",
+            "qc_type": "qc_type",
+            "start": "start",
+            "end": "end",
+            "qc_collect_time": "qc_collect_time",
+            "qc_status": "qc_status",
+            "num_peaks": "num_peaks",
+            "peak_locations": "peak_locations",
+            "peak_heights": "peak_heights",
+            "peak_channel": "peak_channel",
+            "peak_channel_low": "peak_channel_low",
+            "peak_channel_high": "peak_channel_high",
+            "peak_channel_in_bounds": "peak_channel_in_bounds",
+            "peak_cps": "peak_cps",
+            "peak_cps_low": "peak_cps_low",
+            "peak_cps_high": "peak_cps_high",
+            "peak_cps_in_bounds": "peak_cps_in_bounds",
+            "fwhm": "fwhm",
+            "fwhm_low": "fwhm_low",
+            "fwhm_high": "fwhm_high",
+            "fwhm_in_bounds": "fwhm_in_bounds",
+            "num_peaks_low": 2,
+            "num_peaks_high": 2
+        },
+    "detector": {
+        "id": "0253",
+        "qc_roi": [24, 38]
+    },
+    "findingPeak": {
+        "smoothWidth": 11,
+        "smoothWidthStdFactor": 4.0,
+        "slopeThreshold": 0.1,
+        "ampThreshold": 1.0,
+        "peakGroup": 9
+    }
+}
