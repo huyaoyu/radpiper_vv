@@ -17,3 +17,5 @@ QCChecking/output/
 Timestamps/LocalRunFindTimestampBinEdge.py
 Timestamps/data/
 
+*.dat
+
